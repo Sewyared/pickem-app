@@ -1,3 +1,249 @@
+return (
+  <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
+
+    <div className="max-w-xl mx-auto px-4 py-6">
+
+      {/* HEADER */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-3xl font-extrabold">🏈 Pick’em</h1>
+          <p className="text-gray-400 text-sm">{displayName}</p>
+        </div>
+
+        <button
+          onClick={logout}
+          className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-xl text-sm font-semibold"
+        >
+          Logout
+        </button>
+      </div>
+
+      {/* CREATE / JOIN */}
+      <div className="bg-gray-800 border border-gray-700 p-5 rounded-2xl shadow-xl mb-6 space-y-3">
+
+        <input
+          value={leagueName}
+          onChange={(e) => setLeagueName(e.target.value)}
+          placeholder="League name"
+          className="w-full p-3 rounded bg-gray-700 border border-gray-600"
+        />
+
+        <button
+          onClick={createLeague}
+          className="w-full py-3 rounded-xl font-semibold bg-blue-600 hover:bg-blue-500"
+        >
+          Create League
+        </button>
+
+        <input
+          value={joinCode}
+          onChange={(e) => setJoinCode(e.target.value)}
+          placeholder="Join code"
+          className="w-full p-3 rounded bg-gray-700 border border-gray-600"
+        />
+
+        <button
+          onClick={joinLeague}
+          className="w-full py-3 rounded-xl font-semibold bg-green-600 hover:bg-green-500"
+        >
+          Request to Join
+        </button>
+
+        {message && (
+          <div className="text-sm text-yellow-400 bg-yellow-900/20 p-2 rounded">
+            {message}
+          </div>
+        )}
+      </div>
+
+      {/* LEAGUES */}
+      <div className="mb-6 space-y-2">
+        {leagues.map((l) => (
+          <div
+            key={l.id}
+            onClick={() => setActiveLeague(l)}
+            className={`p-3 rounded-xl cursor-pointer border ${
+              activeLeague?.id === l.id
+                ? "bg-blue-600 border-blue-500"
+                : "bg-gray-800 border-gray-700 hover:bg-gray-700"
+            }`}
+          >
+            <div className="flex justify-between">
+              <span className="font-semibold">{l.name}</span>
+              <span className="text-xs text-gray-300">
+                {l.code}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ACTIVE LEAGUE */}
+      {activeLeague && (
+        <div className="bg-gray-800 border border-gray-700 p-5 rounded-2xl shadow-xl mb-6">
+
+          <div className="flex justify-between mb-3">
+            <h2 className="text-lg font-bold">{activeLeague.name}</h2>
+            <span className="text-sm text-gray-400">
+              Code: {activeLeague.code}
+            </span>
+          </div>
+
+          {/* REQUESTS */}
+          {requests.length > 0 && (
+            <div className="mb-4">
+              <h3 className="font-semibold mb-2">Requests</h3>
+
+              {requests.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex justify-between items-center mb-2"
+                >
+                  <span>{r.username}</span>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => acceptRequest(r)}
+                      className="bg-green-600 px-2 py-1 rounded text-xs"
+                    >
+                      Accept
+                    </button>
+
+                    <button
+                      onClick={() => denyRequest(r.id)}
+                      className="bg-red-600 px-2 py-1 rounded text-xs"
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* MEMBERS */}
+          <div className="mb-4">
+            <h3 className="font-semibold mb-2">
+              Members ({members.length})
+            </h3>
+
+            {members.map((m) => (
+              <div
+                key={m.id}
+                className="flex justify-between text-sm mb-1"
+              >
+                <span>
+                  {m.username}
+                  {m.id === user.uid && " (You)"}
+                </span>
+
+                {m.id !== user.uid && (
+                  <button
+                    onClick={() => kickMember(m.id)}
+                    className="text-red-400 text-xs"
+                  >
+                    Kick
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* LEADERBOARD */}
+          <div className="mb-3">
+            <h3 className="font-semibold mb-2">Leaderboard</h3>
+
+            {leaderboard.map((u, i) => (
+              <div
+                key={i}
+                className="flex justify-between text-sm"
+              >
+                <span>
+                  #{i + 1} {u.username}
+                </span>
+                <span>{u.score}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-3 text-sm">
+            <button
+              onClick={leaveLeague}
+              className="text-yellow-400"
+            >
+              Leave
+            </button>
+
+            <button
+              onClick={deleteLeague}
+              className="text-red-400"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* GAMES */}
+      <div className="space-y-3">
+        {games.map((g) => {
+          const locked = isLocked(g.startTime);
+
+          return (
+            <div
+              key={g.id}
+              className="bg-gray-800 border border-gray-700 p-4 rounded-2xl shadow"
+            >
+              <div className="flex justify-between mb-1">
+                <p className="font-semibold">
+                  {g.away} vs {g.home}
+                </p>
+
+                <span className="text-xs text-gray-400">
+                  {getTimeLeft(g.startTime)}
+                </span>
+              </div>
+
+              <div className="flex gap-2 mt-2">
+                <button
+                  disabled={locked}
+                  onClick={() => handlePick(g.id, g.away)}
+                  className={`flex-1 p-2 rounded ${
+                    picks[g.id] === g.away
+                      ? "bg-green-600"
+                      : "bg-gray-700"
+                  }`}
+                >
+                  {g.away}
+                </button>
+
+                <button
+                  disabled={locked}
+                  onClick={() => handlePick(g.id, g.home)}
+                  className={`flex-1 p-2 rounded ${
+                    picks[g.id] === g.home
+                      ? "bg-green-600"
+                      : "bg-gray-700"
+                  }`}
+                >
+                  {g.home}
+                </button>
+              </div>
+
+              <p className="text-xs mt-1 text-gray-400">
+                {locked ? "Locked" : "Open"}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+    </div>
+  </main>
+);
+
+
+
 "use client";
 
 import { useState, useEffect } from "react";

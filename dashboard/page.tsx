@@ -18,13 +18,15 @@ import {
 export default function Dashboard() {
   const [user, setUser] = useState<any>(null);
   const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(true);
 
   const [games, setGames] = useState<any[]>([]);
   const [leagues, setLeagues] = useState<any[]>([]);
   const [activeLeague, setActiveLeague] = useState<any>(null);
 
   const [picks, setPicks] = useState<any>({});
-  const [loading, setLoading] = useState(true);
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [score, setScore] = useState(0);
 
   const [leagueName, setLeagueName] = useState("");
   const [joinCode, setJoinCode] = useState("");
@@ -39,7 +41,6 @@ export default function Dashboard() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) return;
-
       setUser(u);
 
       const snap = await getDoc(doc(db, "users", u.uid));
@@ -47,7 +48,6 @@ export default function Dashboard() {
 
       setLoading(false);
     });
-
     return () => unsub();
   }, []);
 
@@ -55,20 +55,19 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
 
-    const ref = collection(db, "users", user.uid, "leagues");
-
-    return onSnapshot(ref, async (snap) => {
-      const list: any[] = [];
-
-      for (let d of snap.docs) {
-        const leagueDoc = await getDoc(doc(db, "leagues", d.id));
-        if (leagueDoc.exists()) {
-          list.push({ id: d.id, ...leagueDoc.data() });
+    return onSnapshot(
+      collection(db, "users", user.uid, "leagues"),
+      async (snap) => {
+        const list: any[] = [];
+        for (let d of snap.docs) {
+          const leagueDoc = await getDoc(doc(db, "leagues", d.id));
+          if (leagueDoc.exists()) {
+            list.push({ id: d.id, ...leagueDoc.data() });
+          }
         }
+        setLeagues(list);
       }
-
-      setLeagues(list);
-    });
+    );
   }, [user]);
 
   // MEMBERS
@@ -98,6 +97,48 @@ export default function Dashboard() {
       }
     );
   }, [activeLeague, user]);
+
+  // PICKS
+  useEffect(() => {
+    if (!user || !activeLeague) return;
+
+    return onSnapshot(
+      doc(
+        db,
+        "leagues",
+        activeLeague.id,
+        "weeks",
+        weekId,
+        "picks",
+        user.uid
+      ),
+      (snap) => {
+        setPicks(snap.exists() ? snap.data() : {});
+      }
+    );
+  }, [user, activeLeague]);
+
+  // LEADERBOARD
+  useEffect(() => {
+    if (!activeLeague) return;
+
+    return onSnapshot(
+      collection(
+        db,
+        "leagues",
+        activeLeague.id,
+        "weeks",
+        weekId,
+        "scores"
+      ),
+      (snap) => {
+        const data: any[] = [];
+        snap.forEach((d) => data.push(d.data()));
+        data.sort((a, b) => b.score - a.score);
+        setLeaderboard(data);
+      }
+    );
+  }, [activeLeague]);
 
   // GAMES
   useEffect(() => {
@@ -130,30 +171,33 @@ export default function Dashboard() {
     loadGames();
   }, []);
 
-  // PICKS
+  // SCORE
   useEffect(() => {
-    if (!user || !activeLeague) return;
+    let s = 0;
+    games.forEach((g) => {
+      if (g.winner && picks[g.id] === g.winner) s++;
+    });
+    setScore(s);
 
-    return onSnapshot(
-      doc(
-        db,
-        "leagues",
-        activeLeague.id,
-        "weeks",
-        weekId,
-        "picks",
-        user.uid
-      ),
-      (snap) => {
-        setPicks(snap.exists() ? snap.data() : {});
-      }
-    );
-  }, [user, activeLeague]);
+    if (user && activeLeague) {
+      setDoc(
+        doc(
+          db,
+          "leagues",
+          activeLeague.id,
+          "weeks",
+          weekId,
+          "scores",
+          user.uid
+        ),
+        { username: displayName, score: s },
+        { merge: true }
+      );
+    }
+  }, [picks, games, activeLeague]);
 
   // ACTIONS
   const createLeague = async () => {
-    if (!user || !leagueName) return;
-
     const ref = doc(collection(db, "leagues"));
     const code = Math.random().toString(36).substring(2, 8);
 
@@ -171,8 +215,8 @@ export default function Dashboard() {
       username: displayName,
     });
 
-    setLeagueName("");
     setMessage(`Created! Code: ${code}`);
+    setLeagueName("");
   };
 
   const joinLeague = async () => {
@@ -188,7 +232,7 @@ export default function Dashboard() {
 
     await setDoc(
       doc(db, "leagues", league.id, "requests", user.uid),
-      { username: displayName, userId: user.uid }
+      { username: displayName }
     );
 
     setJoinCode("");
@@ -221,21 +265,12 @@ export default function Dashboard() {
     await deleteDoc(
       doc(db, "leagues", activeLeague.id, "members", id)
     );
-
-    await deleteDoc(
-      doc(db, "users", id, "leagues", activeLeague.id)
-    );
   };
 
   const leaveLeague = async () => {
     await deleteDoc(
       doc(db, "leagues", activeLeague.id, "members", user.uid)
     );
-
-    await deleteDoc(
-      doc(db, "users", user.uid, "leagues", activeLeague.id)
-    );
-
     setActiveLeague(null);
   };
 
@@ -264,6 +299,16 @@ export default function Dashboard() {
   const isLocked = (t: string) =>
     Date.now() > new Date(t).getTime() - 7200000;
 
+  const getTimeLeft = (t: string) => {
+    const diff =
+      new Date(t).getTime() - 7200000 - Date.now();
+    if (diff <= 0) return "Locked";
+
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    return `${h}h ${m}m`;
+  };
+
   const logout = async () => {
     await signOut(auth);
     location.reload();
@@ -277,10 +322,13 @@ export default function Dashboard() {
 
         <div className="flex justify-between mb-4">
           <h1 className="text-2xl font-bold">🏈 Pick’em</h1>
-          <button onClick={logout} className="text-red-400">Logout</button>
+          <button onClick={logout} className="text-red-400">
+            Logout
+          </button>
         </div>
 
         <p>User: {displayName}</p>
+        <p className="mb-2">Score: {score}</p>
 
         {/* CREATE / JOIN */}
         <div className="bg-gray-800 p-4 rounded mb-4 space-y-2">
@@ -300,11 +348,14 @@ export default function Dashboard() {
           </div>
         ))}
 
-        {/* ACTIVE LEAGUE */}
+        {/* ACTIVE */}
         {activeLeague && (
-          <div className="bg-gray-900 p-4 mt-3 rounded">
+          <div className="bg-gray-900 p-4 rounded mt-3">
 
-            <h2>{activeLeague.name}</h2>
+            <div className="flex justify-between">
+              <h2>{activeLeague.name}</h2>
+              <span>Code: {activeLeague.code}</span>
+            </div>
 
             {/* REQUESTS */}
             {requests.map(r => (
@@ -325,6 +376,14 @@ export default function Dashboard() {
               </div>
             ))}
 
+            {/* LEADERBOARD */}
+            <div className="mt-3">
+              <h3 className="font-bold">Leaderboard</h3>
+              {leaderboard.map((u,i)=>(
+                <p key={i}>#{i+1} {u.username} - {u.score}</p>
+              ))}
+            </div>
+
             <button onClick={leaveLeague}>Leave</button>
           </div>
         )}
@@ -335,7 +394,8 @@ export default function Dashboard() {
 
           return (
             <div key={g.id} className="bg-gray-800 p-3 mt-2">
-              {g.away} vs {g.home}
+              <p>{g.away} vs {g.home}</p>
+              <p className="text-xs">{getTimeLeft(g.startTime)}</p>
 
               <button disabled={locked} onClick={()=>handlePick(g.id,g.away)}>
                 {g.away}
@@ -347,6 +407,7 @@ export default function Dashboard() {
             </div>
           );
         })}
+
       </div>
     </main>
   );

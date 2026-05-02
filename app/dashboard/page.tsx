@@ -1,36 +1,554 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { auth, db } from "@/lib/firebase";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { useRouter } from "next/navigation";
+import {
+  doc,
+  setDoc,
+  getDoc,
+  collection,
+  onSnapshot,
+  query,
+  where,
+  getDocs,
+  deleteDoc,
+} from "firebase/firestore";
+
+export default function Dashboard() {
+  const router = useRouter();
+
+  // ================= STATE =================
+  const [user, setUser] = useState<any>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const [games, setGames] = useState<any[]>([]);
+  const [leagues, setLeagues] = useState<any[]>([]);
+  const [activeLeague, setActiveLeague] = useState<any>(null);
+
+  const [picks, setPicks] = useState<any>({});
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [seasonBoard, setSeasonBoard] = useState<any[]>([]);
+  const [score, setScore] = useState(0);
+
+  const [leagueName, setLeagueName] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [message, setMessage] = useState("");
+
+  const [members, setMembers] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
+
+  const [isFinalized, setIsFinalized] = useState(false);
+
+  // ================= WEEK SYSTEM =================
+  const getWeekId = () => {
+    const now = new Date();
+    const start = new Date("2026-09-10");
+
+    const diff = Math.floor(
+      (now.getTime() - start.getTime()) /
+        (1000 * 60 * 60 * 24 * 7)
+    );
+
+    return `2026-W${Math.max(1, diff + 1)}`;
+  };
+
+  const weekId = getWeekId();
+
+  // ================= AUTH =================
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (!u) {
+        router.push("/");
+        return;
+      }
+
+      setUser(u);
+
+      const snap = await getDoc(doc(db, "users", u.uid));
+      if (snap.exists()) {
+        setDisplayName(snap.data().username);
+      }
+
+      setLoading(false);
+    });
+
+    return () => unsub();
+  }, []);
+
+  // ================= USER LEAGUES =================
+  useEffect(() => {
+    if (!user) return;
+
+    return onSnapshot(
+      collection(db, "users", user.uid, "leagues"),
+      async (snap) => {
+        const list: any[] = [];
+
+        for (let d of snap.docs) {
+          const leagueDoc = await getDoc(
+            doc(db, "leagues", d.id)
+          );
+
+          if (leagueDoc.exists()) {
+            list.push({
+              id: d.id,
+              ...leagueDoc.data(),
+            });
+          }
+        }
+
+        setLeagues(list);
+      }
+    );
+  }, [user]);
+
+  // ================= MEMBERS =================
+  useEffect(() => {
+    if (!activeLeague) return;
+
+    return onSnapshot(
+      collection(
+        db,
+        "leagues",
+        activeLeague.id,
+        "members"
+      ),
+      (snap) => {
+        const list: any[] = [];
+        snap.forEach((d) =>
+          list.push({ id: d.id, ...d.data() })
+        );
+        setMembers(list);
+      }
+    );
+  }, [activeLeague]);
+
+  // ================= REQUESTS =================
+  useEffect(() => {
+    if (!activeLeague || activeLeague.ownerId !== user?.uid)
+      return;
+
+    return onSnapshot(
+      collection(
+        db,
+        "leagues",
+        activeLeague.id,
+        "requests"
+      ),
+      (snap) => {
+        const list: any[] = [];
+        snap.forEach((d) =>
+          list.push({ id: d.id, ...d.data() })
+        );
+        setRequests(list);
+      }
+    );
+  }, [activeLeague, user]);
+
+  // ================= PICKS =================
+  useEffect(() => {
+    if (!user || !activeLeague) return;
+
+    return onSnapshot(
+      doc(
+        db,
+        "leagues",
+        activeLeague.id,
+        "weeks",
+        weekId,
+        "picks",
+        user.uid
+      ),
+      (snap) => {
+        setPicks(snap.exists() ? snap.data() : {});
+      }
+    );
+  }, [user, activeLeague, weekId]);
+
+  // ================= WEEK STATUS =================
+  useEffect(() => {
+    if (!activeLeague) return;
+
+    return onSnapshot(
+      doc(
+        db,
+        "leagues",
+        activeLeague.id,
+        "weeks",
+        weekId
+      ),
+      (snap) => {
+        setIsFinalized(snap.data()?.finalized || false);
+      }
+    );
+  }, [activeLeague, weekId]);
+
+  // ================= WEEKLY LEADERBOARD =================
+  useEffect(() => {
+    if (!activeLeague) return;
+
+    return onSnapshot(
+      collection(
+        db,
+        "leagues",
+        activeLeague.id,
+        "weeks",
+        weekId,
+        "scores"
+      ),
+      (snap) => {
+        const data: any[] = [];
+
+        snap.forEach((d) => data.push(d.data()));
+
+        data.sort((a, b) => b.score - a.score);
+
+        setLeaderboard(data);
+      }
+    );
+  }, [activeLeague, weekId]);
+
+  // ================= SEASON LEADERBOARD =================
+  useEffect(() => {
+    if (!activeLeague) return;
+
+    return onSnapshot(
+      collection(
+        db,
+        "leagues",
+        activeLeague.id,
+        "seasonScores"
+      ),
+      (snap) => {
+        const data: any[] = [];
+
+        snap.forEach((d) => data.push(d.data()));
+
+        data.sort((a, b) => b.score - a.score);
+
+        setSeasonBoard(data);
+      }
+    );
+  }, [activeLeague]);
+
+  // ================= GAMES =================
+  useEffect(() => {
+    const loadGames = async () => {
+      const res = await fetch(
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+      );
+
+      const data = await res.json();
+
+      const parsed = data.events.map((g: any) => {
+        const comp = g.competitions[0];
+
+        const home = comp.competitors.find(
+          (c: any) => c.homeAway === "home"
+        );
+
+        const away = comp.competitors.find(
+          (c: any) => c.homeAway === "away"
+        );
+
+        return {
+          id: g.id,
+          home: home.team.displayName,
+          away: away.team.displayName,
+          startTime: g.date,
+          completed: g.status.type.completed,
+          winner: home.winner
+            ? home.team.displayName
+            : away.team.displayName,
+        };
+      });
+
+      setGames(parsed);
+    };
+
+    loadGames();
+  }, []);
+  // ================= SAFE SCORING =================
+useEffect(() => {
+  if (!user || !activeLeague || games.length === 0) return;
+
+  const run = async () => {
+    const weekRef = doc(
+      db,
+      "leagues",
+      activeLeague.id,
+      "weeks",
+      weekId
+    );
+
+    const weekSnap = await getDoc(weekRef);
+    if (weekSnap.data()?.finalized) return;
+
+    let s = 0;
+
+    games.forEach((g) => {
+      if (g.completed && picks[g.id] === g.winner) {
+        s++;
+      }
+    });
+
+    setScore(s);
+
+    const scoreRef = doc(
+      db,
+      "leagues",
+      activeLeague.id,
+      "weeks",
+      weekId,
+      "scores",
+      user.uid
+    );
+
+    const existing = await getDoc(scoreRef);
+
+    if (!existing.exists()) {
+      await setDoc(scoreRef, {
+        username: displayName,
+        score: s,
+      });
+
+      const seasonRef = doc(
+        db,
+        "leagues",
+        activeLeague.id,
+        "seasonScores",
+        user.uid
+      );
+
+      const seasonSnap = await getDoc(seasonRef);
+
+      await setDoc(
+        seasonRef,
+        {
+          username: displayName,
+          score:
+            (seasonSnap.data()?.score || 0) + s,
+        },
+        { merge: true }
+      );
+    }
+  };
+
+  run();
+}, [picks, games]);
+
+// ================= FINALIZE WEEK =================
+useEffect(() => {
+  if (!activeLeague || games.length === 0) return;
+
+  const finalize = async () => {
+    const allDone = games.every((g) => g.completed);
+    if (!allDone) return;
+
+    const ref = doc(
+      db,
+      "leagues",
+      activeLeague.id,
+      "weeks",
+      weekId
+    );
+
+    const snap = await getDoc(ref);
+
+    if (snap.data()?.finalized) return;
+
+    await setDoc(
+      ref,
+      { finalized: true },
+      { merge: true }
+    );
+  };
+
+  finalize();
+}, [games]);
+
+// ================= ACTIONS =================
+const createLeague = async () => {
+  const ref = doc(collection(db, "leagues"));
+  const code = Math.random().toString(36).substring(2, 8);
+
+  await setDoc(ref, {
+    name: leagueName,
+    code,
+    ownerId: user.uid,
+  });
+
+  await setDoc(
+    doc(db, "users", user.uid, "leagues", ref.id),
+    { joined: true }
+  );
+
+  await setDoc(
+    doc(db, "leagues", ref.id, "members", user.uid),
+    { username: displayName }
+  );
+
+  setLeagueName("");
+};
+
+const joinLeague = async () => {
+  const q = query(
+    collection(db, "leagues"),
+    where("code", "==", joinCode)
+  );
+
+  const snap = await getDocs(q);
+  if (snap.empty) return setMessage("Invalid code");
+
+  const league = snap.docs[0];
+
+  await setDoc(
+    doc(db, "leagues", league.id, "requests", user.uid),
+    { username: displayName }
+  );
+
+  setJoinCode("");
+};
+
+const acceptRequest = async (r: any) => {
+  await setDoc(
+    doc(db, "leagues", activeLeague.id, "members", r.id),
+    { username: r.username }
+  );
+
+  await setDoc(
+    doc(db, "users", r.id, "leagues", activeLeague.id),
+    { joined: true }
+  );
+
+  await deleteDoc(
+    doc(db, "leagues", activeLeague.id, "requests", r.id)
+  );
+};
+
+const denyRequest = async (id: string) => {
+  await deleteDoc(
+    doc(db, "leagues", activeLeague.id, "requests", id)
+  );
+};
+
+const kickMember = async (id: string) => {
+  await deleteDoc(
+    doc(db, "leagues", activeLeague.id, "members", id)
+  );
+};
+
+const leaveLeague = async () => {
+  await deleteDoc(
+    doc(db, "leagues", activeLeague.id, "members", user.uid)
+  );
+
+  await deleteDoc(
+    doc(db, "users", user.uid, "leagues", activeLeague.id)
+  );
+
+  setActiveLeague(null);
+};
+
+const deleteLeague = async () => {
+  if (activeLeague.ownerId !== user.uid) return;
+
+  await deleteDoc(doc(db, "leagues", activeLeague.id));
+  setActiveLeague(null);
+};
+
+const regenerateCode = async () => {
+  const newCode = Math.random().toString(36).substring(2, 8);
+
+  await setDoc(
+    doc(db, "leagues", activeLeague.id),
+    { code: newCode },
+    { merge: true }
+  );
+};
+
+// ================= PICKS =================
+const handlePick = async (id: string, team: string) => {
+  if (isFinalized) return;
+
+  const ref = doc(
+    db,
+    "leagues",
+    activeLeague.id,
+    "weeks",
+    weekId,
+    "picks",
+    user.uid
+  );
+
+  const updated = { ...picks, [id]: team };
+  setPicks(updated);
+
+  await setDoc(ref, updated, { merge: true });
+};
+
+const isLocked = (t: string) =>
+  Date.now() >= new Date(t).getTime();
+
+const getTimeLeft = (t: string) => {
+  const diff = new Date(t).getTime() - Date.now();
+  if (diff <= 0) return "Locked";
+
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+
+  return `${h}h ${m}m`;
+};
+
+const logout = async () => {
+  await signOut(auth);
+  router.push("/");
+};
+
+if (loading)
+  return <p className="p-6 text-white">Loading...</p>;
+
+const weeklyWinner = leaderboard[0];
+
+// ================= UI =================
 return (
   <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
-
     <div className="max-w-xl mx-auto px-4 py-6">
 
       {/* HEADER */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-extrabold">🏈 Pick’em</h1>
-          <p className="text-gray-400 text-sm">{displayName}</p>
+          <h1 className="text-2xl font-bold">
+            {displayName}
+          </h1>
+          <p className="text-sm text-gray-400">
+            Week {weekId}
+          </p>
         </div>
 
         <button
           onClick={logout}
-          className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-xl text-sm font-semibold"
+          className="border border-red-500/40 text-red-400 px-4 py-2 rounded-xl hover:bg-red-500/10 transition"
         >
           Logout
         </button>
       </div>
 
       {/* CREATE / JOIN */}
-      <div className="bg-gray-800 border border-gray-700 p-5 rounded-2xl shadow-xl mb-6 space-y-3">
-
+      <div className="bg-gray-800 p-4 rounded-xl mb-6 space-y-3 border border-gray-700">
         <input
           value={leagueName}
           onChange={(e) => setLeagueName(e.target.value)}
           placeholder="League name"
-          className="w-full p-3 rounded bg-gray-700 border border-gray-600"
+          className="w-full p-2 bg-gray-700 rounded"
         />
 
         <button
           onClick={createLeague}
-          className="w-full py-3 rounded-xl font-semibold bg-blue-600 hover:bg-blue-500"
+          className="w-full bg-blue-600 hover:bg-blue-500 p-2 rounded"
         >
           Create League
         </button>
@@ -39,861 +557,179 @@ return (
           value={joinCode}
           onChange={(e) => setJoinCode(e.target.value)}
           placeholder="Join code"
-          className="w-full p-3 rounded bg-gray-700 border border-gray-600"
+          className="w-full p-2 bg-gray-700 rounded"
         />
 
         <button
           onClick={joinLeague}
-          className="w-full py-3 rounded-xl font-semibold bg-green-600 hover:bg-green-500"
+          className="w-full bg-green-600 hover:bg-green-500 p-2 rounded"
         >
           Request to Join
         </button>
 
         {message && (
-          <div className="text-sm text-yellow-400 bg-yellow-900/20 p-2 rounded">
+          <p className="text-yellow-400 text-sm">
             {message}
-          </div>
+          </p>
         )}
       </div>
 
       {/* LEAGUES */}
-      <div className="mb-6 space-y-2">
+      <div className="mb-6">
         {leagues.map((l) => (
           <div
             key={l.id}
             onClick={() => setActiveLeague(l)}
-            className={`p-3 rounded-xl cursor-pointer border ${
-              activeLeague?.id === l.id
-                ? "bg-blue-600 border-blue-500"
-                : "bg-gray-800 border-gray-700 hover:bg-gray-700"
-            }`}
+            className="bg-gray-800 border border-gray-700 p-3 mb-2 rounded cursor-pointer hover:bg-gray-700"
           >
-            <div className="flex justify-between">
-              <span className="font-semibold">{l.name}</span>
-              <span className="text-xs text-gray-300">
-                {l.code}
-              </span>
-            </div>
+            {l.name} ({l.code})
           </div>
         ))}
       </div>
 
       {/* ACTIVE LEAGUE */}
       {activeLeague && (
-        <div className="bg-gray-800 border border-gray-700 p-5 rounded-2xl shadow-xl mb-6">
+        <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl mb-6">
 
           <div className="flex justify-between mb-3">
-            <h2 className="text-lg font-bold">{activeLeague.name}</h2>
-            <span className="text-sm text-gray-400">
-              Code: {activeLeague.code}
-            </span>
+            <h2 className="font-semibold">
+              {activeLeague.name}
+            </h2>
+
+            <button
+              onClick={regenerateCode}
+              className="text-xs text-blue-400 hover:underline"
+            >
+              Regenerate Code
+            </button>
           </div>
 
           {/* REQUESTS */}
-          {requests.length > 0 && (
-            <div className="mb-4">
-              <h3 className="font-semibold mb-2">Requests</h3>
-
-              {requests.map((r) => (
-                <div
-                  key={r.id}
-                  className="flex justify-between items-center mb-2"
-                >
-                  <span>{r.username}</span>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => acceptRequest(r)}
-                      className="bg-green-600 px-2 py-1 rounded text-xs"
-                    >
-                      Accept
-                    </button>
-
-                    <button
-                      onClick={() => denyRequest(r.id)}
-                      className="bg-red-600 px-2 py-1 rounded text-xs"
-                    >
-                      Deny
-                    </button>
-                  </div>
-                </div>
-              ))}
+          {requests.map((r) => (
+            <div key={r.id} className="flex justify-between mb-1">
+              <span>{r.username}</span>
+              <div className="flex gap-2">
+                <button onClick={() => acceptRequest(r)}>✔</button>
+                <button onClick={() => denyRequest(r.id)}>✖</button>
+              </div>
             </div>
-          )}
+          ))}
 
           {/* MEMBERS */}
-          <div className="mb-4">
-            <h3 className="font-semibold mb-2">
-              Members ({members.length})
-            </h3>
+          {members.map((m) => (
+            <div key={m.id} className="flex justify-between text-sm">
+              <span>
+                {m.username}
+                {m.id === user.uid && " (You)"}
+              </span>
 
-            {members.map((m) => (
-              <div
-                key={m.id}
-                className="flex justify-between text-sm mb-1"
-              >
-                <span>
-                  {m.username}
-                  {m.id === user.uid && " (You)"}
-                </span>
+              {m.id !== user.uid && (
+                <button
+                  onClick={() => kickMember(m.id)}
+                  className="text-red-400 text-xs"
+                >
+                  Kick
+                </button>
+              )}
+            </div>
+          ))}
 
-                {m.id !== user.uid && (
-                  <button
-                    onClick={() => kickMember(m.id)}
-                    className="text-red-400 text-xs"
-                  >
-                    Kick
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* LEADERBOARD */}
-          <div className="mb-3">
-            <h3 className="font-semibold mb-2">Leaderboard</h3>
-
-            {leaderboard.map((u, i) => (
-              <div
-                key={i}
-                className="flex justify-between text-sm"
-              >
-                <span>
-                  #{i + 1} {u.username}
-                </span>
-                <span>{u.score}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex gap-3 text-sm">
-            <button
-              onClick={leaveLeague}
-              className="text-yellow-400"
-            >
+          <div className="flex gap-4 mt-3 text-sm">
+            <button onClick={leaveLeague} className="text-yellow-400">
               Leave
             </button>
 
-            <button
-              onClick={deleteLeague}
-              className="text-red-400"
-            >
+            <button onClick={deleteLeague} className="text-red-400">
               Delete
             </button>
           </div>
+
+          {/* LEADERBOARDS */}
+          <div className="mt-4">
+            <h3 className="font-semibold mb-1">Weekly</h3>
+            {leaderboard.map((u, i) => (
+              <p key={i}>
+                #{i + 1} {u.username} - {u.score}
+              </p>
+            ))}
+          </div>
+
+          <div className="mt-4">
+            <h3 className="font-semibold mb-1">Season</h3>
+            {seasonBoard.map((u, i) => (
+              <p key={i}>
+                #{i + 1} {u.username} - {u.score}
+              </p>
+            ))}
+          </div>
+
+          {weeklyWinner && (
+            <div className="mt-3 text-green-400 font-semibold">
+              🏆 {weeklyWinner.username}
+            </div>
+          )}
         </div>
       )}
 
       {/* GAMES */}
-      <div className="space-y-3">
-        {games.map((g) => {
-          const locked = isLocked(g.startTime);
+      {activeLeague && (
+        <div className="space-y-4">
+          {games.map((g) => {
+            const locked = isLocked(g.startTime);
+            const picked = picks[g.id];
 
-          return (
-            <div
-              key={g.id}
-              className="bg-gray-800 border border-gray-700 p-4 rounded-2xl shadow"
-            >
-              <div className="flex justify-between mb-1">
-                <p className="font-semibold">
-                  {g.away} vs {g.home}
-                </p>
+            return (
+              <div
+                key={g.id}
+                className={`p-4 rounded-2xl border transition ${
+                  locked
+                    ? "bg-gray-800/60 border-gray-700 opacity-70"
+                    : "bg-gray-800 border-gray-600 hover:border-green-500"
+                }`}
+              >
+                <div className="flex justify-between mb-2">
+                  <div>
+                    <p className="text-xs text-gray-400">
+                      {new Date(g.startTime).toLocaleString()}
+                    </p>
+                    <h3 className="font-bold">
+                      {g.away} @ {g.home}
+                    </h3>
+                  </div>
 
-                <span className="text-xs text-gray-400">
-                  {getTimeLeft(g.startTime)}
-                </span>
+                  <span className="text-xs">
+                    {locked ? "LOCKED" : getTimeLeft(g.startTime)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  {[g.away, g.home].map((team) => (
+                    <button
+                      key={team}
+                      disabled={locked || isFinalized}
+                      onClick={() => handlePick(g.id, team)}
+                      className={`p-2 rounded ${
+                        picked === team
+                          ? "bg-green-600"
+                          : "bg-gray-700"
+                      }`}
+                    >
+                      {team}
+                    </button>
+                  ))}
+                </div>
+
+                {g.completed && (
+                  <p className="text-xs text-green-400 mt-1">
+                    Winner: {g.winner}
+                  </p>
+                )}
               </div>
-
-              <div className="flex gap-2 mt-2">
-                <button
-                  disabled={locked}
-                  onClick={() => handlePick(g.id, g.away)}
-                  className={`flex-1 p-2 rounded ${
-                    picks[g.id] === g.away
-                      ? "bg-green-600"
-                      : "bg-gray-700"
-                  }`}
-                >
-                  {g.away}
-                </button>
-
-                <button
-                  disabled={locked}
-                  onClick={() => handlePick(g.id, g.home)}
-                  className={`flex-1 p-2 rounded ${
-                    picks[g.id] === g.home
-                      ? "bg-green-600"
-                      : "bg-gray-700"
-                  }`}
-                >
-                  {g.home}
-                </button>
-              </div>
-
-              <p className="text-xs mt-1 text-gray-400">
-                {locked ? "Locked" : "Open"}
-              </p>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
     </div>
   </main>
-);
-
-
-
-"use client";
-
-import { useState, useEffect } from "react";
-import { auth, db } from "@/lib/firebase";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import {
-  doc,
-  setDoc,
-  getDoc,
-  collection,
-  getDocs,
-  deleteDoc,
-} from "firebase/firestore";
-import { useRouter } from "next/navigation";
-
-export default function Dashboard() {
-  const router = useRouter();
-
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  const [games, setGames] = useState<any[]>([]);
-  const [displayName, setDisplayName] = useState("");
-  const [picks, setPicks] = useState<{ [key: number]: string }>({});
-  const [score, setScore] = useState(0);
-
-  const [leagueName, setLeagueName] = useState("");
-  const [joinCode, setJoinCode] = useState("");
-  const [leagues, setLeagues] = useState<any[]>([]);
-  const [activeLeague, setActiveLeague] = useState<any>(null);
-  const [leaderboard, setLeaderboard] = useState<any[]>([]);
-
-  const [createdCode, setCreatedCode] = useState("");
-  const [members, setMembers] = useState<any[]>([]);
-  const [requests, setRequests] = useState<any[]>([]);
-
-  // WEEK ID
-  const getWeekId = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const firstJan = new Date(year, 0, 1);
-    const days = Math.floor((now.getTime() - firstJan.getTime()) / 86400000);
-    const week = Math.ceil((days + firstJan.getDay() + 1) / 7);
-    return `${year}-W${week}`;
-  };
-
-  const weekId = getWeekId();
-
-  // LOCK (2h before game)
-  const isLocked = (startTime: string) => {
-    const gameTime = new Date(startTime).getTime();
-    return new Date().getTime() > gameTime - 2 * 60 * 60 * 1000;
-  };
-
-  // COUNTDOWN
-  const getTimeLeft = (startTime: string) => {
-    const lockTime = new Date(startTime).getTime() - 2 * 60 * 60 * 1000;
-    const diff = lockTime - new Date().getTime();
-
-    if (diff <= 0) return "Locked";
-
-    const h = Math.floor(diff / (1000 * 60 * 60));
-    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-    return `${h}h ${m}m`;
-  };
-
-  // AUTH
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      if (!u) router.replace("/");
-      else setUser(u);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, []);
-
-  // LOAD USERNAME
-  useEffect(() => {
-    if (!user) return;
-
-    const load = async () => {
-      const snap = await getDoc(doc(db, "users", user.uid));
-      if (snap.exists()) setDisplayName(snap.data().username);
-    };
-
-    load();
-  }, [user]);
-
-  // FETCH NFL GAMES
-  useEffect(() => {
-    const fetchGames = async () => {
-      const res = await fetch(
-        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
-      );
-      const data = await res.json();
-
-      const parsed = data.events.map((g: any, i: number) => {
-        const comp = g.competitions[0];
-        const home = comp.competitors.find((c: any) => c.homeAway === "home");
-        const away = comp.competitors.find((c: any) => c.homeAway === "away");
-
-        let winner = "";
-        if (g.status.type.completed) {
-          winner = home.winner
-            ? home.team.displayName
-            : away.team.displayName;
-        }
-
-        return {
-          id: i,
-          home: home.team.displayName,
-          away: away.team.displayName,
-          startTime: g.date,
-          winner,
-        };
-      });
-
-      setGames(parsed);
-    };
-
-    fetchGames();
-  }, []);
-
-  // LOAD LEAGUES
-  const loadLeagues = async () => {
-    if (!user) return;
-
-    const snap = await getDocs(collection(db, "leagues"));
-    const list: any[] = [];
-
-    for (let l of snap.docs) {
-      const member = await getDoc(
-        doc(db, "leagues", l.id, "members", user.uid)
-      );
-
-      if (member.exists()) {
-        const membersSnap = await getDocs(
-          collection(db, "leagues", l.id, "members")
-        );
-
-        list.push({
-          id: l.id,
-          ...l.data(),
-          memberCount: membersSnap.size,
-        });
-      }
-    }
-
-    setLeagues(list);
-  };
-
-  useEffect(() => {
-    if (user) loadLeagues();
-  }, [user]);
-
-  // LOAD MEMBERS
-  useEffect(() => {
-    if (!activeLeague) return;
-
-    const loadMembers = async () => {
-      const snap = await getDocs(
-        collection(db, "leagues", activeLeague.id, "members")
-      );
-
-      const list: any[] = [];
-      snap.forEach((doc) =>
-        list.push({ id: doc.id, ...doc.data() })
-      );
-
-      setMembers(list);
-    };
-
-    loadMembers();
-  }, [activeLeague]);
-    // LOAD JOIN REQUESTS (OWNER ONLY)
-  useEffect(() => {
-    if (!activeLeague || activeLeague.ownerId !== user?.uid) return;
-
-    const loadRequests = async () => {
-      const snap = await getDocs(
-        collection(db, "leagues", activeLeague.id, "requests")
-      );
-
-      const list: any[] = [];
-      snap.forEach((doc) =>
-        list.push({ id: doc.id, ...doc.data() })
-      );
-
-      setRequests(list);
-    };
-
-    loadRequests();
-  }, [activeLeague, user]);
-
-  // LOAD PICKS
-  useEffect(() => {
-    if (!user || !activeLeague || games.length === 0) return;
-
-    const load = async () => {
-      const data: any = {};
-
-      for (let g of games) {
-        const snap = await getDoc(
-          doc(
-            db,
-            "leagues",
-            activeLeague.id,
-            "weeks",
-            weekId,
-            "picks",
-            `${user.uid}_${g.id}`
-          )
-        );
-
-        if (snap.exists()) data[g.id] = snap.data().team;
-      }
-
-      setPicks(data);
-    };
-
-    load();
-  }, [user, activeLeague, games]);
-
-  // SCORE CALCULATION
-  useEffect(() => {
-    if (!activeLeague) return;
-
-    let total = 0;
-
-    games.forEach((g) => {
-      if (g.winner && picks[g.id] === g.winner) total++;
-    });
-
-    setScore(total);
-
-    if (user) {
-      setDoc(
-        doc(
-          db,
-          "leagues",
-          activeLeague.id,
-          "weeks",
-          weekId,
-          "scores",
-          user.uid
-        ),
-        { username: displayName, score: total }
-      );
-    }
-  }, [picks, displayName, games, activeLeague]);
-
-  // LEADERBOARD
-  useEffect(() => {
-    if (!activeLeague) return;
-
-    const load = async () => {
-      const snap = await getDocs(
-        collection(
-          db,
-          "leagues",
-          activeLeague.id,
-          "weeks",
-          weekId,
-          "scores"
-        )
-      );
-
-      const data: any[] = [];
-      snap.forEach((d) => data.push(d.data()));
-      data.sort((a, b) => b.score - a.score);
-
-      setLeaderboard(data);
-    };
-
-    load();
-  }, [activeLeague, score]);
-
-  // PICK HANDLER
-  const handlePick = async (id: number, team: string) => {
-    if (!user || !activeLeague) return;
-
-    setPicks((prev) => ({ ...prev, [id]: team }));
-
-    await setDoc(
-      doc(
-        db,
-        "leagues",
-        activeLeague.id,
-        "weeks",
-        weekId,
-        "picks",
-        `${user.uid}_${id}`
-      ),
-      { team }
-    );
-  };
-
-  // LOGOUT
-  const logout = async () => {
-    await signOut(auth);
-    router.replace("/");
-  };
-
-  // CREATE LEAGUE
-  const createLeague = async () => {
-    if (!user) return;
-
-    const code = Math.random().toString(36).substring(2, 8);
-    const ref = doc(collection(db, "leagues"));
-
-    await setDoc(ref, {
-      name: leagueName,
-      code,
-      ownerId: user.uid,
-    });
-
-    await setDoc(doc(db, "leagues", ref.id, "members", user.uid), {
-      username: displayName,
-    });
-
-    setCreatedCode(code);
-    setLeagueName("");
-
-    loadLeagues();
-  };
-
-  // JOIN LEAGUE (REQUEST SYSTEM)
-  const joinLeague = async () => {
-    if (!user) return;
-
-    const snap = await getDocs(collection(db, "leagues"));
-    let found: any = null;
-
-    snap.forEach((d) => {
-      if (d.data().code === joinCode) {
-        found = { id: d.id, ...d.data() };
-      }
-    });
-
-    if (!found) return alert("League not found");
-
-    await setDoc(
-      doc(db, "leagues", found.id, "requests", user.uid),
-      {
-        username: displayName,
-        userId: user.uid,
-      }
-    );
-
-    alert("Request sent for approval");
-    setJoinCode("");
-  };
-
-  // DELETE LEAGUE
-  const deleteLeague = async () => {
-    if (!activeLeague || activeLeague.ownerId !== user.uid) return;
-
-    await deleteDoc(doc(db, "leagues", activeLeague.id));
-    setActiveLeague(null);
-    loadLeagues();
-  };
-
-  // LEAVE LEAGUE
-  const leaveLeague = async () => {
-    if (!activeLeague || !user) return;
-
-    await deleteDoc(
-      doc(db, "leagues", activeLeague.id, "members", user.uid)
-    );
-
-    setActiveLeague(null);
-    loadLeagues();
-  };
-
-  // KICK MEMBER
-  const kickMember = async (memberId: string) => {
-    if (!activeLeague) return;
-
-    await deleteDoc(
-      doc(db, "leagues", activeLeague.id, "members", memberId)
-    );
-
-    // refresh members
-    const updated = members.filter((m) => m.id !== memberId);
-    setMembers(updated);
-  };
-    if (loading) return <p className="p-6 text-white">Loading...</p>;
-  if (!user) return null;
-
-  return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white p-4">
-      <div className="max-w-xl mx-auto">
-
-        {/* HEADER */}
-        <div className="flex justify-between items-center mb-4">
-          <h1 className="text-2xl font-bold">🏈 Pick’em</h1>
-          <button onClick={logout} className="text-red-400">Logout</button>
-        </div>
-
-        <p>User: {displayName}</p>
-        <p className="text-sm text-gray-400">Week: {weekId}</p>
-        <p className="mb-4 font-semibold">Score: {score}</p>
-
-        {/* CREATE / JOIN */}
-        <div className="bg-gray-800 p-4 rounded mb-4 space-y-2">
-          <input
-            placeholder="League name"
-            value={leagueName}
-            onChange={(e) => setLeagueName(e.target.value)}
-            className="w-full p-2 bg-gray-700 rounded"
-          />
-          <button
-            onClick={createLeague}
-            className="w-full bg-blue-600 p-2 rounded"
-          >
-            Create League
-          </button>
-
-          <input
-            placeholder="Join code"
-            value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value)}
-            className="w-full p-2 bg-gray-700 rounded"
-          />
-          <button
-            onClick={joinLeague}
-            className="w-full bg-green-600 p-2 rounded"
-          >
-            Request to Join
-          </button>
-        </div>
-
-        {/* LEAGUES LIST */}
-        {leagues.map((l) => (
-          <div
-            key={l.id}
-            onClick={() => setActiveLeague(l)}
-            className={`p-2 mb-2 rounded cursor-pointer ${
-              activeLeague?.id === l.id
-                ? "bg-blue-700"
-                : "bg-gray-700"
-            }`}
-          >
-            {l.name} ({l.memberCount})
-          </div>
-        ))}
-
-        {/* ACTIVE LEAGUE */}
-        {activeLeague && (
-          <div className="bg-gray-800 p-4 rounded mt-3 space-y-3">
-
-            {/* CODE */}
-            <div className="flex justify-between bg-gray-700 p-2 rounded text-sm">
-              <span>Code: <strong>{activeLeague.code}</strong></span>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(activeLeague.code);
-                  alert("Copied");
-                }}
-              >
-                Copy
-              </button>
-            </div>
-
-            {/* INVITE LINK */}
-            <div className="flex gap-2">
-              <input
-                readOnly
-                value={`${typeof window !== "undefined" ? window.location.origin : ""}/join/${activeLeague.id}`}
-                className="flex-1 p-2 rounded bg-gray-700 text-sm"
-              />
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(
-                    `${window.location.origin}/join/${activeLeague.id}`
-                  );
-                  alert("Link copied!");
-                }}
-                className="bg-blue-600 px-2 rounded"
-              >
-                Copy
-              </button>
-            </div>
-
-            {/* REGENERATE CODE */}
-            {activeLeague.ownerId === user.uid && (
-              <button
-                onClick={async () => {
-                  const newCode = Math.random().toString(36).substring(2, 8);
-
-                  await setDoc(
-                    doc(db, "leagues", activeLeague.id),
-                    { code: newCode },
-                    { merge: true }
-                  );
-
-                  setActiveLeague({ ...activeLeague, code: newCode });
-                }}
-                className="bg-purple-600 w-full py-2 rounded"
-              >
-                Regenerate Code
-              </button>
-            )}
-
-            {/* JOIN REQUESTS */}
-            {activeLeague.ownerId === user.uid && requests.length > 0 && (
-              <div>
-                <h3 className="font-bold mb-2">Requests</h3>
-
-                {requests.map((r) => (
-                  <div key={r.id} className="flex justify-between mb-1">
-                    <span>{r.username}</span>
-
-                    <div className="flex gap-2">
-                      <button
-                        onClick={async () => {
-                          await setDoc(
-                            doc(db, "leagues", activeLeague.id, "members", r.id),
-                            { username: r.username }
-                          );
-
-                          await deleteDoc(
-                            doc(db, "leagues", activeLeague.id, "requests", r.id)
-                          );
-                        }}
-                        className="bg-green-600 px-2 rounded text-sm"
-                      >
-                        Accept
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          await deleteDoc(
-                            doc(db, "leagues", activeLeague.id, "requests", r.id)
-                          );
-                        }}
-                        className="bg-red-600 px-2 rounded text-sm"
-                      >
-                        Deny
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* MEMBERS */}
-            <div>
-              <h3 className="font-bold mb-2">
-                Members ({members.length})
-              </h3>
-
-              {members.map((m) => (
-                <div key={m.id} className="flex justify-between text-sm mb-1">
-                  <span>
-                    🏈 {m.username}
-                    {m.username === displayName && " (You)"}
-                  </span>
-
-                  {activeLeague.ownerId === user.uid &&
-                    m.id !== user.uid && (
-                      <button
-                        onClick={() => kickMember(m.id)}
-                        className="text-red-400 text-xs"
-                      >
-                        Kick
-                      </button>
-                    )}
-                </div>
-              ))}
-            </div>
-
-            {/* ACTIONS */}
-            <div className="flex gap-4 text-sm">
-              {activeLeague.ownerId === user.uid ? (
-                <button
-                  onClick={deleteLeague}
-                  className="text-red-400"
-                >
-                  Delete League
-                </button>
-              ) : (
-                <button
-                  onClick={leaveLeague}
-                  className="text-yellow-400"
-                >
-                  Leave League
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* GAMES */}
-        {games.map((g) => {
-          const locked = isLocked(g.startTime);
-
-          return (
-            <div key={g.id} className="bg-gray-800 p-4 rounded mt-3">
-              <p className="font-semibold">
-                {g.away} vs {g.home}
-              </p>
-
-              <p className="text-xs text-gray-400">
-                {new Date(g.startTime).toLocaleString()}
-              </p>
-
-              <p className="text-yellow-400 text-xs">
-                ⏳ {getTimeLeft(g.startTime)}
-              </p>
-
-              <p className={locked ? "text-red-400" : "text-green-400"}>
-                {locked ? "🔒 Locked" : "🟢 Open"}
-              </p>
-
-              <div className="flex gap-2 mt-2">
-                <button
-                  onClick={() => handlePick(g.id, g.away)}
-                  disabled={locked}
-                  className="flex-1 bg-gray-700 p-2 rounded"
-                >
-                  {g.away}
-                </button>
-
-                <button
-                  onClick={() => handlePick(g.id, g.home)}
-                  disabled={locked}
-                  className="flex-1 bg-gray-700 p-2 rounded"
-                >
-                  {g.home}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* LEADERBOARD */}
-        <div className="bg-gray-800 p-4 rounded mt-4">
-          <h2 className="font-bold mb-2">Leaderboard</h2>
-
-          {leaderboard.map((u, i) => (
-            <p key={i} className="flex justify-between text-sm">
-              <span>#{i + 1} {u.username}</span>
-              <span>{u.score}</span>
-            </p>
-          ))}
-        </div>
-
-      </div>
-    </main>
-  );
-}
+);}

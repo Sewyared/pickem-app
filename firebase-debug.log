@@ -1,0 +1,92 @@
+[debug] [2026-05-02T06:37:16.401Z] ----------------------------------------------------------------------
+[debug] [2026-05-02T06:37:16.480Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\yared\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js init functions
+[debug] [2026-05-02T06:37:16.486Z] CLI Version:   15.15.0
+[debug] [2026-05-02T06:37:16.491Z] Platform:      win32
+[debug] [2026-05-02T06:37:16.493Z] Node Version:  v24.15.0
+[debug] [2026-05-02T06:37:16.496Z] Time:          Sat May 02 2026 01:37:16 GMT-0500 (Central Daylight Time)
+[debug] [2026-05-02T06:37:16.498Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-05-02T06:37:16.537Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  C:\Users\yared\pickem-app
+
+[debug] [2026-05-02T06:37:44.547Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-05-02T06:37:44.551Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] 
+[debug] [2026-05-02T06:38:02.807Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-05-02T06:38:02.811Z] > authorizing via signed-in user (yared1alemu@gmail.com)
+[debug] [2026-05-02T06:38:02.821Z] Checked if tokens are valid: false, expires at: 1777487529410
+[debug] [2026-05-02T06:38:02.823Z] Checked if tokens are valid: false, expires at: 1777487529410
+[debug] [2026-05-02T06:38:02.827Z] > refreshing access token with scopes: []
+[debug] [2026-05-02T06:38:02.840Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-05-02T06:38:02.841Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-05-02T06:38:03.161Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-05-02T06:38:03.162Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-05-02T06:38:03.237Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=100
+[debug] [2026-05-02T06:38:03.794Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2026-05-02T06:38:03.795Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] 
+=== Functions Setup
+[debug] [2026-05-02T06:38:08.254Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-05-02T06:38:08.255Z] > authorizing via signed-in user (yared1alemu@gmail.com)
+[debug] [2026-05-02T06:38:08.257Z] [iam] checking project pickem-e920b for permissions ["firebase.projects.get"]
+[debug] [2026-05-02T06:38:08.263Z] Checked if tokens are valid: true, expires at: 1777707482164
+[debug] [2026-05-02T06:38:08.264Z] Checked if tokens are valid: true, expires at: 1777707482164
+[debug] [2026-05-02T06:38:08.265Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/pickem-e920b:testIamPermissions [none]
+[debug] [2026-05-02T06:38:08.266Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/pickem-e920b:testIamPermissions  x-goog-user-project=pickem-e920b
+[debug] [2026-05-02T06:38:08.266Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/pickem-e920b:testIamPermissions {"permissions":["firebase.projects.get"]}
+[debug] [2026-05-02T06:38:08.506Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/pickem-e920b:testIamPermissions 200
+[debug] [2026-05-02T06:38:08.508Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/pickem-e920b:testIamPermissions {"permissions":["firebase.projects.get"]}
+[debug] [2026-05-02T06:38:08.514Z] Checked if tokens are valid: true, expires at: 1777707482164
+[debug] [2026-05-02T06:38:08.515Z] Checked if tokens are valid: true, expires at: 1777707482164
+[debug] [2026-05-02T06:38:08.518Z] Checked if tokens are valid: true, expires at: 1777707482164
+[debug] [2026-05-02T06:38:08.518Z] Checked if tokens are valid: true, expires at: 1777707482164
+[debug] [2026-05-02T06:38:08.520Z] >>> [apiv2][query] GET https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/cloudfunctions.googleapis.com [none]
+[debug] [2026-05-02T06:38:08.520Z] >>> [apiv2][(partial)header] GET https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/cloudfunctions.googleapis.com  x-goog-user-project=pickem-e920b
+[debug] [2026-05-02T06:38:08.531Z] >>> [apiv2][query] GET https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/runtimeconfig.googleapis.com [none]
+[debug] [2026-05-02T06:38:08.532Z] >>> [apiv2][(partial)header] GET https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/runtimeconfig.googleapis.com  x-goog-user-project=pickem-e920b
+[debug] [2026-05-02T06:38:08.898Z] <<< [apiv2][status] GET https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/cloudfunctions.googleapis.com 200
+[debug] [2026-05-02T06:38:08.899Z] <<< [apiv2][body] GET https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/cloudfunctions.googleapis.com [omitted]
+[debug] [2026-05-02T06:38:08.902Z] Checked if tokens are valid: true, expires at: 1777707482164
+[debug] [2026-05-02T06:38:08.903Z] Checked if tokens are valid: true, expires at: 1777707482164
+[debug] [2026-05-02T06:38:08.904Z] >>> [apiv2][query] POST https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/cloudfunctions.googleapis.com:enable [none]
+[debug] [2026-05-02T06:38:08.904Z] >>> [apiv2][(partial)header] POST https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/cloudfunctions.googleapis.com:enable  x-goog-user-project=pickem-e920b
+[debug] [2026-05-02T06:38:08.916Z] <<< [apiv2][status] GET https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/runtimeconfig.googleapis.com 200
+[debug] [2026-05-02T06:38:08.917Z] <<< [apiv2][body] GET https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/runtimeconfig.googleapis.com [omitted]
+[debug] [2026-05-02T06:38:09.309Z] <<< [apiv2][status] POST https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/cloudfunctions.googleapis.com:enable 200
+[debug] [2026-05-02T06:38:09.310Z] <<< [apiv2][body] POST https://serviceusage.googleapis.com/v1/projects/pickem-e920b/services/cloudfunctions.googleapis.com:enable [omitted]
+[info] Let's create a new codebase for your functions.
+[info] A directory corresponding to the codebase will be created in your project
+[info] with sample code pre-configured.
+
+[info] See https://firebase.google.com/docs/functions/organize-functions for
+[info] more information on organizing your functions using codebases.
+
+[info] Functions can be deployed with firebase deploy.
+
+[debug] [2026-05-02T06:38:36.036Z] ExitPromptError: User force closed the prompt with SIGINT
+    at Interface.sigint (C:\Users\yared\AppData\Roaming\npm\node_modules\firebase-tools\node_modules\@inquirer\core\dist\commonjs\lib\create-prompt.js:101:37)
+    at Interface.emit (node:events:509:28)
+    at [_ttyWrite] [as _ttyWrite] (node:internal/readline/interface:1327:18)
+    at ReadStream.onkeypress (node:internal/readline/interface:284:20)
+    at ReadStream.emit (node:events:521:24)
+    at emitKeys (node:internal/readline/utils:371:14)
+    at emitKeys.next (<anonymous>)
+    at ReadStream.onData (node:internal/readline/emitKeypressEvents:64:36)
+    at ReadStream.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+[error] 
+[error] Error: An unexpected error has occurred.

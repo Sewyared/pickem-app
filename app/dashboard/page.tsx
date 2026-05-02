@@ -30,7 +30,11 @@ export default function Dashboard() {
   const [activeLeague, setActiveLeague] = useState<any>(null);
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
 
-  // WEEK
+  const [createdCode, setCreatedCode] = useState("");
+  const [members, setMembers] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
+
+  // WEEK ID
   const getWeekId = () => {
     const now = new Date();
     const year = now.getFullYear();
@@ -42,6 +46,25 @@ export default function Dashboard() {
 
   const weekId = getWeekId();
 
+  // LOCK (2h before game)
+  const isLocked = (startTime: string) => {
+    const gameTime = new Date(startTime).getTime();
+    return new Date().getTime() > gameTime - 2 * 60 * 60 * 1000;
+  };
+
+  // COUNTDOWN
+  const getTimeLeft = (startTime: string) => {
+    const lockTime = new Date(startTime).getTime() - 2 * 60 * 60 * 1000;
+    const diff = lockTime - new Date().getTime();
+
+    if (diff <= 0) return "Locked";
+
+    const h = Math.floor(diff / (1000 * 60 * 60));
+    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+    return `${h}h ${m}m`;
+  };
+
   // AUTH
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -52,7 +75,7 @@ export default function Dashboard() {
     return () => unsub();
   }, []);
 
-  // USERNAME
+  // LOAD USERNAME
   useEffect(() => {
     if (!user) return;
 
@@ -64,7 +87,7 @@ export default function Dashboard() {
     load();
   }, [user]);
 
-  // FETCH GAMES
+  // FETCH NFL GAMES
   useEffect(() => {
     const fetchGames = async () => {
       const res = await fetch(
@@ -110,7 +133,18 @@ export default function Dashboard() {
       const member = await getDoc(
         doc(db, "leagues", l.id, "members", user.uid)
       );
-      if (member.exists()) list.push({ id: l.id, ...l.data() });
+
+      if (member.exists()) {
+        const membersSnap = await getDocs(
+          collection(db, "leagues", l.id, "members")
+        );
+
+        list.push({
+          id: l.id,
+          ...l.data(),
+          memberCount: membersSnap.size,
+        });
+      }
     }
 
     setLeagues(list);
@@ -120,30 +154,44 @@ export default function Dashboard() {
     if (user) loadLeagues();
   }, [user]);
 
-  // INVITE AUTO JOIN
+  // LOAD MEMBERS
   useEffect(() => {
-    if (!user) return;
+    if (!activeLeague) return;
 
-    const handleInvite = async () => {
-      const leagueId = localStorage.getItem("inviteLeague");
-      if (!leagueId) return;
-
-      const userSnap = await getDoc(doc(db, "users", user.uid));
-      const username = userSnap.exists()
-        ? userSnap.data().username
-        : "User";
-
-      await setDoc(
-        doc(db, "leagues", leagueId, "members", user.uid),
-        { username }
+    const loadMembers = async () => {
+      const snap = await getDocs(
+        collection(db, "leagues", activeLeague.id, "members")
       );
 
-      localStorage.removeItem("inviteLeague");
-      loadLeagues();
+      const list: any[] = [];
+      snap.forEach((doc) =>
+        list.push({ id: doc.id, ...doc.data() })
+      );
+
+      setMembers(list);
     };
 
-    handleInvite();
-  }, [user]);
+    loadMembers();
+  }, [activeLeague]);
+    // LOAD JOIN REQUESTS (OWNER ONLY)
+  useEffect(() => {
+    if (!activeLeague || activeLeague.ownerId !== user?.uid) return;
+
+    const loadRequests = async () => {
+      const snap = await getDocs(
+        collection(db, "leagues", activeLeague.id, "requests")
+      );
+
+      const list: any[] = [];
+      snap.forEach((doc) =>
+        list.push({ id: doc.id, ...doc.data() })
+      );
+
+      setRequests(list);
+    };
+
+    loadRequests();
+  }, [activeLeague, user]);
 
   // LOAD PICKS
   useEffect(() => {
@@ -174,7 +222,7 @@ export default function Dashboard() {
     load();
   }, [user, activeLeague, games]);
 
-  // SCORE
+  // SCORE CALCULATION
   useEffect(() => {
     if (!activeLeague) return;
 
@@ -219,7 +267,7 @@ export default function Dashboard() {
       );
 
       const data: any[] = [];
-      snap.forEach((doc) => data.push(doc.data()));
+      snap.forEach((d) => data.push(d.data()));
       data.sort((a, b) => b.score - a.score);
 
       setLeaderboard(data);
@@ -228,7 +276,7 @@ export default function Dashboard() {
     load();
   }, [activeLeague, score]);
 
-  // PICK
+  // PICK HANDLER
   const handlePick = async (id: number, team: string) => {
     if (!user || !activeLeague) return;
 
@@ -248,14 +296,13 @@ export default function Dashboard() {
     );
   };
 
-  const isLocked = (time: string) => new Date() > new Date(time);
-
-  // ACTIONS
+  // LOGOUT
   const logout = async () => {
     await signOut(auth);
     router.replace("/");
   };
 
+  // CREATE LEAGUE
   const createLeague = async () => {
     if (!user) return;
 
@@ -272,40 +319,49 @@ export default function Dashboard() {
       username: displayName,
     });
 
+    setCreatedCode(code);
+    setLeagueName("");
+
     loadLeagues();
   };
 
+  // JOIN LEAGUE (REQUEST SYSTEM)
   const joinLeague = async () => {
     if (!user) return;
 
     const snap = await getDocs(collection(db, "leagues"));
     let found: any = null;
 
-    snap.forEach((docSnap) => {
-      if (docSnap.data().code === joinCode) {
-        found = { id: docSnap.id, ...docSnap.data() };
+    snap.forEach((d) => {
+      if (d.data().code === joinCode) {
+        found = { id: d.id, ...d.data() };
       }
     });
 
     if (!found) return alert("League not found");
 
     await setDoc(
-      doc(db, "leagues", found.id, "members", user.uid),
-      { username: displayName }
+      doc(db, "leagues", found.id, "requests", user.uid),
+      {
+        username: displayName,
+        userId: user.uid,
+      }
     );
 
-    loadLeagues();
+    alert("Request sent for approval");
+    setJoinCode("");
   };
 
+  // DELETE LEAGUE
   const deleteLeague = async () => {
     if (!activeLeague || activeLeague.ownerId !== user.uid) return;
-    if (!confirm("Delete this league?")) return;
 
     await deleteDoc(doc(db, "leagues", activeLeague.id));
     setActiveLeague(null);
     loadLeagues();
   };
 
+  // LEAVE LEAGUE
   const leaveLeague = async () => {
     if (!activeLeague || !user) return;
 
@@ -317,140 +373,252 @@ export default function Dashboard() {
     loadLeagues();
   };
 
-  if (loading) return <p className="p-6 text-white">Loading...</p>;
+  // KICK MEMBER
+  const kickMember = async (memberId: string) => {
+    if (!activeLeague) return;
+
+    await deleteDoc(
+      doc(db, "leagues", activeLeague.id, "members", memberId)
+    );
+
+    // refresh members
+    const updated = members.filter((m) => m.id !== memberId);
+    setMembers(updated);
+  };
+    if (loading) return <p className="p-6 text-white">Loading...</p>;
   if (!user) return null;
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white p-6">
+    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white p-4">
       <div className="max-w-xl mx-auto">
 
         {/* HEADER */}
-        <div className="flex justify-between mb-6">
-          <h1 className="text-3xl font-extrabold tracking-wide">
-            NFL Pick’em
-          </h1>
-          <button onClick={logout} className="bg-red-600 px-3 py-1 rounded">
-            Logout
-          </button>
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-2xl font-bold">🏈 Pick’em</h1>
+          <button onClick={logout} className="text-red-400">Logout</button>
         </div>
 
-        <p className="mb-1">User: {displayName}</p>
+        <p>User: {displayName}</p>
         <p className="text-sm text-gray-400">Week: {weekId}</p>
         <p className="mb-4 font-semibold">Score: {score}</p>
 
-        {/* LEAGUES */}
-        <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl mb-6">
-          <h2 className="font-bold mb-4">Leagues</h2>
+        {/* CREATE / JOIN */}
+        <div className="bg-gray-800 p-4 rounded mb-4 space-y-2">
+          <input
+            placeholder="League name"
+            value={leagueName}
+            onChange={(e) => setLeagueName(e.target.value)}
+            className="w-full p-2 bg-gray-700 rounded"
+          />
+          <button
+            onClick={createLeague}
+            className="w-full bg-blue-600 p-2 rounded"
+          >
+            Create League
+          </button>
 
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            <input
-              placeholder="League name"
-              value={leagueName}
-              onChange={(e) => setLeagueName(e.target.value)}
-              className="col-span-2 p-2 rounded bg-gray-700"
-            />
-            <button onClick={createLeague} className="bg-blue-600 rounded">
-              Create
-            </button>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 mb-4">
-            <input
-              placeholder="Join code"
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value)}
-              className="col-span-2 p-2 rounded bg-gray-700"
-            />
-            <button onClick={joinLeague} className="bg-green-600 rounded">
-              Join
-            </button>
-          </div>
-
-          {leagues.map((l) => (
-            <div
-              key={l.id}
-              onClick={() => setActiveLeague(l)}
-              className={`p-2 rounded cursor-pointer ${
-                activeLeague?.id === l.id
-                  ? "bg-blue-900"
-                  : "hover:bg-gray-700"
-              }`}
-            >
-              {l.name}
-            </div>
-          ))}
+          <input
+            placeholder="Join code"
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value)}
+            className="w-full p-2 bg-gray-700 rounded"
+          />
+          <button
+            onClick={joinLeague}
+            className="w-full bg-green-600 p-2 rounded"
+          >
+            Request to Join
+          </button>
         </div>
 
-{activeLeague && (
-  <div className="mt-4 space-y-3">
+        {/* LEAGUES LIST */}
+        {leagues.map((l) => (
+          <div
+            key={l.id}
+            onClick={() => setActiveLeague(l)}
+            className={`p-2 mb-2 rounded cursor-pointer ${
+              activeLeague?.id === l.id
+                ? "bg-blue-700"
+                : "bg-gray-700"
+            }`}
+          >
+            {l.name} ({l.memberCount})
+          </div>
+        ))}
 
-    {/* 🔗 INVITE LINK */}
-    <div className="flex gap-2">
-      <input
-        readOnly
-        value={`${typeof window !== "undefined" ? window.location.origin : ""}/join/${activeLeague.id}`}
-        className="flex-1 p-2 rounded bg-gray-700 text-sm text-gray-200 border border-gray-600"
-      />
-      <button
-        onClick={() => {
-          navigator.clipboard.writeText(
-            `${window.location.origin}/join/${activeLeague.id}`
-          );
-          alert("Link copied!");
-        }}
-        className="bg-blue-600 hover:bg-blue-500 px-3 rounded text-sm"
-      >
-        Copy
-      </button>
-    </div>
+        {/* ACTIVE LEAGUE */}
+        {activeLeague && (
+          <div className="bg-gray-800 p-4 rounded mt-3 space-y-3">
 
-    {/* ACTIONS */}
-    <div className="flex gap-3 text-sm">
-      {activeLeague.ownerId === user.uid ? (
-        <button
-          onClick={deleteLeague}
-          className="text-red-400 hover:text-red-300"
-        >
-          Delete League
-        </button>
-      ) : (
-        <button
-          onClick={leaveLeague}
-          className="text-yellow-400 hover:text-yellow-300"
-        >
-          Leave League
-        </button>
-      )}
-    </div>
+            {/* CODE */}
+            <div className="flex justify-between bg-gray-700 p-2 rounded text-sm">
+              <span>Code: <strong>{activeLeague.code}</strong></span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(activeLeague.code);
+                  alert("Copied");
+                }}
+              >
+                Copy
+              </button>
+            </div>
 
-  </div>
-)}
+            {/* INVITE LINK */}
+            <div className="flex gap-2">
+              <input
+                readOnly
+                value={`${typeof window !== "undefined" ? window.location.origin : ""}/join/${activeLeague.id}`}
+                className="flex-1 p-2 rounded bg-gray-700 text-sm"
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    `${window.location.origin}/join/${activeLeague.id}`
+                  );
+                  alert("Link copied!");
+                }}
+                className="bg-blue-600 px-2 rounded"
+              >
+                Copy
+              </button>
+            </div>
 
+            {/* REGENERATE CODE */}
+            {activeLeague.ownerId === user.uid && (
+              <button
+                onClick={async () => {
+                  const newCode = Math.random().toString(36).substring(2, 8);
 
+                  await setDoc(
+                    doc(db, "leagues", activeLeague.id),
+                    { code: newCode },
+                    { merge: true }
+                  );
 
+                  setActiveLeague({ ...activeLeague, code: newCode });
+                }}
+                className="bg-purple-600 w-full py-2 rounded"
+              >
+                Regenerate Code
+              </button>
+            )}
+
+            {/* JOIN REQUESTS */}
+            {activeLeague.ownerId === user.uid && requests.length > 0 && (
+              <div>
+                <h3 className="font-bold mb-2">Requests</h3>
+
+                {requests.map((r) => (
+                  <div key={r.id} className="flex justify-between mb-1">
+                    <span>{r.username}</span>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          await setDoc(
+                            doc(db, "leagues", activeLeague.id, "members", r.id),
+                            { username: r.username }
+                          );
+
+                          await deleteDoc(
+                            doc(db, "leagues", activeLeague.id, "requests", r.id)
+                          );
+                        }}
+                        className="bg-green-600 px-2 rounded text-sm"
+                      >
+                        Accept
+                      </button>
+
+                      <button
+                        onClick={async () => {
+                          await deleteDoc(
+                            doc(db, "leagues", activeLeague.id, "requests", r.id)
+                          );
+                        }}
+                        className="bg-red-600 px-2 rounded text-sm"
+                      >
+                        Deny
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* MEMBERS */}
+            <div>
+              <h3 className="font-bold mb-2">
+                Members ({members.length})
+              </h3>
+
+              {members.map((m) => (
+                <div key={m.id} className="flex justify-between text-sm mb-1">
+                  <span>
+                    🏈 {m.username}
+                    {m.username === displayName && " (You)"}
+                  </span>
+
+                  {activeLeague.ownerId === user.uid &&
+                    m.id !== user.uid && (
+                      <button
+                        onClick={() => kickMember(m.id)}
+                        className="text-red-400 text-xs"
+                      >
+                        Kick
+                      </button>
+                    )}
+                </div>
+              ))}
+            </div>
+
+            {/* ACTIONS */}
+            <div className="flex gap-4 text-sm">
+              {activeLeague.ownerId === user.uid ? (
+                <button
+                  onClick={deleteLeague}
+                  className="text-red-400"
+                >
+                  Delete League
+                </button>
+              ) : (
+                <button
+                  onClick={leaveLeague}
+                  className="text-yellow-400"
+                >
+                  Leave League
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* GAMES */}
         {games.map((g) => {
           const locked = isLocked(g.startTime);
 
           return (
-            <div key={g.id} className="bg-gray-800 border border-gray-700 p-4 rounded-xl mb-4">
+            <div key={g.id} className="bg-gray-800 p-4 rounded mt-3">
+              <p className="font-semibold">
+                {g.away} vs {g.home}
+              </p>
 
-              <div className="text-center mb-3">
-                <p className="text-lg font-bold">{g.away}</p>
-                <p className="text-gray-400 text-sm">VS</p>
-                <p className="text-lg font-bold">{g.home}</p>
-              </div>
+              <p className="text-xs text-gray-400">
+                {new Date(g.startTime).toLocaleString()}
+              </p>
 
-              <div className="flex gap-2">
+              <p className="text-yellow-400 text-xs">
+                ⏳ {getTimeLeft(g.startTime)}
+              </p>
+
+              <p className={locked ? "text-red-400" : "text-green-400"}>
+                {locked ? "🔒 Locked" : "🟢 Open"}
+              </p>
+
+              <div className="flex gap-2 mt-2">
                 <button
                   onClick={() => handlePick(g.id, g.away)}
                   disabled={locked}
-                  className={`flex-1 py-2 rounded font-semibold transition ${
-                    picks[g.id] === g.away
-                      ? "bg-blue-600 scale-105"
-                      : "bg-gray-700 hover:bg-gray-600"
-                  }`}
+                  className="flex-1 bg-gray-700 p-2 rounded"
                 >
                   {g.away}
                 </button>
@@ -458,11 +626,7 @@ export default function Dashboard() {
                 <button
                   onClick={() => handlePick(g.id, g.home)}
                   disabled={locked}
-                  className={`flex-1 py-2 rounded font-semibold transition ${
-                    picks[g.id] === g.home
-                      ? "bg-green-600 scale-105"
-                      : "bg-gray-700 hover:bg-gray-600"
-                  }`}
+                  className="flex-1 bg-gray-700 p-2 rounded"
                 >
                   {g.home}
                 </button>
@@ -472,13 +636,13 @@ export default function Dashboard() {
         })}
 
         {/* LEADERBOARD */}
-        <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl mt-6">
-          <h2 className="font-bold mb-3">Leaderboard</h2>
+        <div className="bg-gray-800 p-4 rounded mt-4">
+          <h2 className="font-bold mb-2">Leaderboard</h2>
 
           {leaderboard.map((u, i) => (
-            <p key={i} className="flex justify-between border-b border-gray-700 py-1">
+            <p key={i} className="flex justify-between text-sm">
               <span>#{i + 1} {u.username}</span>
-              <span className="font-bold">{u.score}</span>
+              <span>{u.score}</span>
             </p>
           ))}
         </div>
